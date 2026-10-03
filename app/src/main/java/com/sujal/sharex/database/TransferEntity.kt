@@ -7,6 +7,7 @@ import androidx.room.PrimaryKey
 data class TransferEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val fileName: String,
+    val filePath: String,
     val isSent: Boolean,
     val timestamp: Long,
     val status: String

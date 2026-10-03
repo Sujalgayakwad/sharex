@@ -12,6 +12,6 @@ class ShareXApplication : Application() {
         database = Room.databaseBuilder(
             applicationContext,
             TransferDatabase::class.java, "sharex-db"
-        ).build()
+        ).fallbackToDestructiveMigration().build()
     }
 }

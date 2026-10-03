@@ -35,6 +35,7 @@ class TransferManager(
     
     private var pendingFilePayload: Payload? = null
     private var pendingFileName: String = ""
+    private var pendingUriToSend: Uri? = null
 
     val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
@@ -110,10 +111,11 @@ class TransferManager(
                         val javaFile = payload.asFile()?.asJavaFile()
                         val info = incomingFilePayloads[update.payloadId]
                         if (javaFile != null && info != null) {
-                            FileUtils.copyToDownloads(context, javaFile, info.fileName)
+                            val filePath = FileUtils.copyToDownloads(context, javaFile, info.fileName)
                             CoroutineScope(Dispatchers.IO).launch {
                                 database.transferDao().insert(TransferEntity(
                                     fileName = info.fileName,
+                                    filePath = filePath,
                                     isSent = false,
                                     timestamp = System.currentTimeMillis(),
                                     status = "SUCCESS"
@@ -127,6 +129,7 @@ class TransferManager(
                             CoroutineScope(Dispatchers.IO).launch {
                                 database.transferDao().insert(TransferEntity(
                                     fileName = pendingFileName,
+                                    filePath = pendingUriToSend?.toString() ?: "",
                                     isSent = true,
                                     timestamp = System.currentTimeMillis(),
                                     status = "SUCCESS"
@@ -145,6 +148,7 @@ class TransferManager(
 
     fun prepareFileToSend(endpointId: String, uri: Uri, fileName: String) {
         pendingFileName = fileName
+        pendingUriToSend = uri
         val pfd = context.contentResolver.openFileDescriptor(uri, "r")
         if (pfd != null) {
             val payload = Payload.fromFile(pfd)

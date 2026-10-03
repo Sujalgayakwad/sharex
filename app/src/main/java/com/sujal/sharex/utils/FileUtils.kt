@@ -9,7 +9,7 @@ import java.io.File
 import java.io.FileInputStream
 
 object FileUtils {
-    fun copyToDownloads(context: Context, sourceFile: File, fileName: String) {
+    fun copyToDownloads(context: Context, sourceFile: File, fileName: String): String {
         val resolver = context.contentResolver
         val contentValues = ContentValues().apply {
             put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
@@ -25,6 +25,13 @@ object FileUtils {
                     inputStream.copyTo(outputStream)
                 }
             }
+            return uri.toString()
+        } else {
+            val dir = File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS), "ShareX")
+            if (!dir.exists()) dir.mkdirs()
+            val destFile = File(dir, fileName)
+            sourceFile.copyTo(destFile, overwrite = true)
+            return destFile.absolutePath
         }
     }
 }
