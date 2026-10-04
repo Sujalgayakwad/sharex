@@ -1,4 +1,4 @@
-﻿package com.sujal.sharex.ui
+package com.sujal.sharex.ui
 
 import androidx.compose.runtime.Composable
 import androidx.navigation.compose.NavHost
@@ -15,5 +15,6 @@ fun AppNavigation(transferManager: TransferManager, nearbyManager: NearbyManager
         composable("home") { HomeScreen(navController, database) }
         composable("send") { SendScreen(navController, transferManager, nearbyManager) }
         composable("receive") { ReceiveScreen(navController, transferManager, nearbyManager) }
+        composable("settings") { SettingsScreen(navController, database) }
     }
 }

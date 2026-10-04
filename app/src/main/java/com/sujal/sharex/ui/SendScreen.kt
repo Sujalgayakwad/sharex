@@ -20,6 +20,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -28,6 +29,8 @@ import androidx.navigation.NavController
 import com.sujal.sharex.nearby.NearbyManager
 import com.sujal.sharex.transfer.TransferManager
 import com.sujal.sharex.utils.PermissionUtils
+import com.sujal.sharex.utils.QrUtils
+import java.util.UUID
 
 @Composable
 fun SendScreen(navController: NavController, transferManager: TransferManager, nearbyManager: NearbyManager) {
@@ -36,6 +39,8 @@ fun SendScreen(navController: NavController, transferManager: TransferManager, n
     val transferState by transferManager.transferState.collectAsState()
     var selectedUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
     var totalSelectedSize by remember { mutableStateOf(0L) }
+    var showQrDialog by remember { mutableStateOf(false) }
+    var sessionId by remember { mutableStateOf("") }
     
     val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
         selectedUris = uris
@@ -99,9 +104,23 @@ fun SendScreen(navController: NavController, transferManager: TransferManager, n
             }
         }
         
+        
         Spacer(modifier = Modifier.height(32.dp))
-        Text("Nearby Receivers", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
-        Text("Ensure receiver is waiting on the Receive screen.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+            Column {
+                Text("Nearby Receivers", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                Text("Ensure receiver is waiting.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Button(
+                onClick = { 
+                    sessionId = UUID.randomUUID().toString().substring(0, 8)
+                    showQrDialog = true 
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
+            ) {
+                Text("Show QR", color = Color.White)
+            }
+        }
         Spacer(modifier = Modifier.height(16.dp))
         
         if (discoveredDevices.isEmpty()) {
@@ -166,6 +185,34 @@ fun SendScreen(navController: NavController, transferManager: TransferManager, n
                 }
             }
         }
+    }
+
+    if (showQrDialog) {
+        val qrBitmap = remember(sessionId) { QrUtils.generateQrCode(sessionId) }
+        AlertDialog(
+            onDismissRequest = { showQrDialog = false },
+            title = { Text("Scan to Connect", color = Color.White, fontWeight = FontWeight.Bold) },
+            text = {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.fillMaxWidth()) {
+                    qrBitmap?.let {
+                        androidx.compose.foundation.Image(
+                            bitmap = it.asImageBitmap(),
+                            contentDescription = "QR Code",
+                            modifier = Modifier.size(200.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text("Or enter code manually:", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(sessionId, fontSize = 24.sp, fontWeight = FontWeight.ExtraBold, color = MaterialTheme.colorScheme.primary, letterSpacing = 2.sp)
+                }
+            },
+            confirmButton = {
+                Button(onClick = { showQrDialog = false }) {
+                    Text("Close")
+                }
+            },
+            containerColor = MaterialTheme.colorScheme.surface
+        )
     }
 }
 

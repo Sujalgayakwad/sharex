@@ -58,7 +58,14 @@ fun HomeScreen(navController: NavController, database: TransferDatabase) {
                     Text("ShareX", color = Color.White, fontSize = 28.sp, fontWeight = FontWeight.ExtraBold)
                     Text("My Device", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 14.sp)
                 }
-                Box(modifier = Modifier.size(48.dp).clip(CircleShape).background(MaterialTheme.colorScheme.surfaceVariant), contentAlignment = Alignment.Center) {
+                Box(
+                    modifier = Modifier
+                        .size(48.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                        .clickable { navController.navigate("settings") },
+                    contentAlignment = Alignment.Center
+                ) {
                     Icon(Icons.Default.Settings, contentDescription = "Settings", tint = Color.White)
                 }
             }

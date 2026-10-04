@@ -45,6 +45,7 @@ class TransferManager(
     
     private val incomingFilePayloads = mutableMapOf<Long, FileInfo>()
     private val receivedPayloads = mutableMapOf<Long, Payload>()
+    private val endpointNames = mutableMapOf<String, String>()
     
     // Sender side queue
     private val pendingSendPayloads = mutableListOf<Payload>()
@@ -57,6 +58,7 @@ class TransferManager(
 
     val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
+            endpointNames[endpointId] = info.endpointName
             nearbyManager.acceptConnection(endpointId, payloadCallback)
         }
         override fun onConnectionResult(endpointId: String, result: ConnectionResolution) {
@@ -90,16 +92,41 @@ class TransferManager(
                                 totalSize += size
                             }
                             
-                            transferState.value = transferState.value.copy(
-                                pendingTransferInfo = PendingTransferInfo(
-                                    totalFiles = array.length(),
-                                    totalSize = totalSize
-                                ),
+                            val pendingInfo = PendingTransferInfo(
                                 totalFiles = array.length(),
                                 totalSize = totalSize,
-                                completedFiles = 0,
-                                totalTransferredBytes = 0L
+                                senderName = endpointNames[endpointId] ?: "Sender"
                             )
+                            
+                            CoroutineScope(Dispatchers.Main).launch {
+                                var autoAccept = false
+                                kotlinx.coroutines.withContext(Dispatchers.IO) {
+                                    val devices = database.trustedDeviceDao().getAll()
+                                    val senderName = endpointNames[endpointId] ?: ""
+                                    val trusted = devices.find { it.deviceName == senderName }
+                                    if (trusted != null && trusted.autoAccept && !trusted.isBlocked) {
+                                        autoAccept = true
+                                    }
+                                }
+                                
+                                if (autoAccept) {
+                                    transferState.value = transferState.value.copy(
+                                        totalFiles = array.length(),
+                                        totalSize = totalSize,
+                                        completedFiles = 0,
+                                        totalTransferredBytes = 0L
+                                    )
+                                    acceptTransfer(endpointId)
+                                } else {
+                                    transferState.value = transferState.value.copy(
+                                        pendingTransferInfo = pendingInfo,
+                                        totalFiles = array.length(),
+                                        totalSize = totalSize,
+                                        completedFiles = 0,
+                                        totalTransferredBytes = 0L
+                                    )
+                                }
+                            }
                         }
                         "TRANSFER_ACCEPT" -> {
                             startFileTransfer(endpointId)
