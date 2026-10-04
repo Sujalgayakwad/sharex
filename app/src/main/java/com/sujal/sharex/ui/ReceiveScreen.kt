@@ -1,4 +1,4 @@
-﻿package com.sujal.sharex.ui
+package com.sujal.sharex.ui
 
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -7,7 +7,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.PhoneAndroid
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,39 +38,57 @@ fun ReceiveScreen(navController: NavController, transferManager: TransferManager
         onDispose { nearbyManager.stopAll() }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF5F6FA)).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text("Receive Files", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF333333))
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("Receive Files", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
         Spacer(modifier = Modifier.height(8.dp))
-        Text("Waiting for sender to connect...", color = Color.Gray, fontSize = 16.sp)
+        Text("Waiting for sender to connect...", color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp)
         
         Spacer(modifier = Modifier.height(64.dp))
         
-        Box(modifier = Modifier.size(200.dp).background(Color(0xFFE8F5E9), CircleShape), contentAlignment = Alignment.Center) {
-            Box(modifier = Modifier.size(140.dp).background(Color(0xFF4CAF50), CircleShape), contentAlignment = Alignment.Center) {
-                 CircularProgressIndicator(color = Color.White, modifier = Modifier.size(80.dp), strokeWidth = 6.dp)
+        // Radar / Discovery Animation UI
+        Box(modifier = Modifier.size(200.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape), contentAlignment = Alignment.Center) {
+            Box(modifier = Modifier.size(140.dp).background(MaterialTheme.colorScheme.secondary, CircleShape), contentAlignment = Alignment.Center) {
+                 CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, modifier = Modifier.size(100.dp), strokeWidth = 2.dp)
+                 Icon(Icons.Default.PhoneAndroid, contentDescription = null, tint = Color.White, modifier = Modifier.size(48.dp))
             }
         }
         
         Spacer(modifier = Modifier.height(48.dp))
         
-        if (connectedEndpoint != null && transferState.pendingFileInfo == null && !transferState.isTransferring && !transferState.isComplete) {
-            Text("Sender Connected!", color = Color(0xFF4CAF50), fontWeight = FontWeight.Bold, fontSize = 20.sp)
+        if (connectedEndpoint != null && transferState.pendingTransferInfo == null && !transferState.isTransferring && !transferState.isComplete) {
+            Text("Sender Connected!", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold, fontSize = 20.sp)
         }
         
-        if (transferState.pendingFileInfo != null) {
-            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(24.dp), elevation = CardDefaults.cardElevation(8.dp)) {
+        if (transferState.pendingTransferInfo != null) {
+            Card(
+                modifier = Modifier.fillMaxWidth(), 
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
+                shape = RoundedCornerShape(24.dp), 
+                elevation = CardDefaults.cardElevation(0.dp)
+            ) {
                 Column(modifier = Modifier.padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Incoming File", fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = Color(0xFF333333))
-                    Spacer(modifier = Modifier.height(12.dp))
-                    Text(transferState.pendingFileInfo!!.fileName, color = Color.Gray, fontSize = 16.sp)
+                    Text("Incoming Transfer", fontWeight = FontWeight.ExtraBold, fontSize = 24.sp, color = Color.White)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    
+                    Text("${transferState.pendingTransferInfo!!.totalFiles} files", color = Color.White, fontSize = 18.sp, fontWeight = FontWeight.SemiBold)
+                    Text(formatSize(transferState.pendingTransferInfo!!.totalSize), color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 16.sp)
+                    
                     Spacer(modifier = Modifier.height(32.dp))
                     Row(horizontalArrangement = Arrangement.SpaceEvenly, modifier = Modifier.fillMaxWidth()) {
-                        Button(onClick = { transferManager.rejectTransfer(connectedEndpoint!!) }, modifier = Modifier.height(50.dp).weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336))) { 
-                            Text("Reject", fontSize = 16.sp, fontWeight = FontWeight.Bold) 
+                        Button(
+                            onClick = { transferManager.rejectTransfer(connectedEndpoint!!) }, 
+                            modifier = Modifier.height(50.dp).weight(1f), 
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFF44336))
+                        ) { 
+                            Text("Decline", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White) 
                         }
                         Spacer(modifier = Modifier.width(16.dp))
-                        Button(onClick = { transferManager.acceptTransfer(connectedEndpoint!!) }, modifier = Modifier.height(50.dp).weight(1f), colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF4CAF50))) { 
-                            Text("Accept", fontSize = 16.sp, fontWeight = FontWeight.Bold) 
+                        Button(
+                            onClick = { transferManager.acceptTransfer(connectedEndpoint!!) }, 
+                            modifier = Modifier.height(50.dp).weight(1f), 
+                            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                        ) { 
+                            Text("Accept", fontSize = 16.sp, fontWeight = FontWeight.Bold, color = Color.White) 
                         }
                     }
                 }
@@ -78,19 +96,42 @@ fun ReceiveScreen(navController: NavController, transferManager: TransferManager
         }
         
         if (transferState.isTransferring || transferState.isComplete) {
-            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(16.dp)) {
+            Card(
+                modifier = Modifier.fillMaxWidth(), 
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
+                shape = RoundedCornerShape(16.dp)
+            ) {
                 Column(modifier = Modifier.padding(20.dp)) {
-                    Text("Receiving ${transferState.fileName}", fontWeight = FontWeight.Bold, color = Color(0xFF333333))
+                    Text(
+                        if (transferState.isComplete) "Successfully saved to Downloads" else "Receiving... ${transferState.completedFiles}/${transferState.totalFiles} files", 
+                        fontWeight = FontWeight.Bold, 
+                        color = Color.White
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
+                    
+                    val overallProgress = if (transferState.totalSize > 0) {
+                        transferState.totalTransferredBytes.toFloat() / transferState.totalSize.toFloat()
+                    } else 0f
+                    
                     LinearProgressIndicator(
-                        progress = transferState.progress, 
+                        progress = overallProgress, 
                         modifier = Modifier.fillMaxWidth().height(10.dp),
-                        color = Color(0xFF4CAF50)
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(if (transferState.isComplete) "Successfully saved to Downloads/ShareX" else "${(transferState.progress * 100).toInt()}%", color = if (transferState.isComplete) Color(0xFF4CAF50) else Color.Gray, fontWeight = FontWeight.Bold)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(formatSize(transferState.totalTransferredBytes) + " / " + formatSize(transferState.totalSize), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${(overallProgress * 100).toInt()}%", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
     }
+}
+
+private fun formatSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val z = (63 - java.lang.Long.numberOfLeadingZeros(bytes)) / 10
+    return String.format("%.1f %sB", bytes.toDouble() / (1L shl (z * 10)), " KMGTPE"[z])
 }

@@ -1,7 +1,8 @@
-﻿package com.sujal.sharex.transfer
+package com.sujal.sharex.transfer
 
 import android.content.Context
 import android.net.Uri
+import android.provider.OpenableColumns
 import com.google.android.gms.nearby.connection.*
 import com.sujal.sharex.database.TransferDatabase
 import com.sujal.sharex.database.TransferEntity
@@ -11,17 +12,29 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 
 data class TransferState(
-    val fileName: String = "",
-    val progress: Float = 0f,
+    val currentFileName: String = "",
+    val currentFileProgress: Float = 0f,
     val isTransferring: Boolean = false,
     val isComplete: Boolean = false,
-    val pendingFileInfo: FileInfo? = null
+    val pendingTransferInfo: PendingTransferInfo? = null,
+    val totalFiles: Int = 0,
+    val completedFiles: Int = 0,
+    val totalSize: Long = 0L,
+    val totalTransferredBytes: Long = 0L
 )
 
-data class FileInfo(val fileName: String, val payloadId: Long)
+data class PendingTransferInfo(
+    val totalFiles: Int,
+    val totalSize: Long,
+    val senderName: String = "Sender"
+)
+
+data class FileInfo(val fileName: String, val payloadId: Long, val size: Long = 0)
+data class SentFileInfo(val fileName: String, val uri: Uri)
 
 class TransferManager(
     private val context: Context,
@@ -33,9 +46,14 @@ class TransferManager(
     private val incomingFilePayloads = mutableMapOf<Long, FileInfo>()
     private val receivedPayloads = mutableMapOf<Long, Payload>()
     
-    private var pendingFilePayload: Payload? = null
-    private var pendingFileName: String = ""
-    private var pendingUriToSend: Uri? = null
+    // Sender side queue
+    private val pendingSendPayloads = mutableListOf<Payload>()
+    private val pendingSendFilesInfo = mutableMapOf<Long, SentFileInfo>()
+    private var totalBytesToSend = 0L
+
+    // For progress calculation
+    private var completedFilesCount = 0
+    private var transferredBytesByPayload = mutableMapOf<Long, Long>()
 
     val connectionLifecycleCallback = object : ConnectionLifecycleCallback() {
         override fun onConnectionInitiated(endpointId: String, info: ConnectionInfo) {
@@ -60,19 +78,34 @@ class TransferManager(
                     val message = String(payload.asBytes()!!)
                     val json = JSONObject(message)
                     when (json.getString("type")) {
-                        "FILE_INFO" -> {
-                            val fileName = json.getString("fileName")
-                            val payloadId = json.getLong("payloadId")
-                            incomingFilePayloads[payloadId] = FileInfo(fileName, payloadId)
+                        "FILE_INFO_LIST" -> {
+                            val array = json.getJSONArray("files")
+                            var totalSize = 0L
+                            for (i in 0 until array.length()) {
+                                val obj = array.getJSONObject(i)
+                                val fileName = obj.getString("fileName")
+                                val payloadId = obj.getLong("payloadId")
+                                val size = obj.optLong("size", 0L)
+                                incomingFilePayloads[payloadId] = FileInfo(fileName, payloadId, size)
+                                totalSize += size
+                            }
+                            
                             transferState.value = transferState.value.copy(
-                                pendingFileInfo = FileInfo(fileName, payloadId)
+                                pendingTransferInfo = PendingTransferInfo(
+                                    totalFiles = array.length(),
+                                    totalSize = totalSize
+                                ),
+                                totalFiles = array.length(),
+                                totalSize = totalSize,
+                                completedFiles = 0,
+                                totalTransferredBytes = 0L
                             )
                         }
                         "TRANSFER_ACCEPT" -> {
                             startFileTransfer(endpointId)
                         }
                         "TRANSFER_REJECT" -> {
-                            transferState.value = transferState.value.copy(pendingFileInfo = null)
+                            transferState.value = transferState.value.copy(pendingTransferInfo = null)
                         }
                     }
                 }
@@ -81,10 +114,10 @@ class TransferManager(
                     val info = incomingFilePayloads[payload.id]
                     if (info != null) {
                         transferState.value = transferState.value.copy(
-                            fileName = info.fileName,
+                            currentFileName = info.fileName,
                             isTransferring = true,
-                            progress = 0f,
-                            pendingFileInfo = null
+                            currentFileProgress = 0f,
+                            pendingTransferInfo = null
                         )
                     }
                 }
@@ -92,22 +125,29 @@ class TransferManager(
         }
 
         override fun onPayloadTransferUpdate(endpointId: String, update: PayloadTransferUpdate) {
+            transferredBytesByPayload[update.payloadId] = update.bytesTransferred
+            
+            // Calculate overall progress
+            var totalTransferred = 0L
+            transferredBytesByPayload.values.forEach { totalTransferred += it }
+
             when (update.status) {
                 PayloadTransferUpdate.Status.IN_PROGRESS -> {
                     val progress = if (update.totalBytes > 0) {
                         update.bytesTransferred.toFloat() / update.totalBytes.toFloat()
                     } else 0f
-                    transferState.value = transferState.value.copy(progress = progress)
+                    
+                    transferState.value = transferState.value.copy(
+                        currentFileProgress = progress,
+                        totalTransferredBytes = totalTransferred
+                    )
                 }
                 PayloadTransferUpdate.Status.SUCCESS -> {
-                    transferState.value = transferState.value.copy(
-                        isTransferring = false,
-                        isComplete = true,
-                        progress = 1f
-                    )
+                    completedFilesCount++
                     
                     val payload = receivedPayloads[update.payloadId]
                     if (payload != null && payload.type == Payload.Type.FILE) {
+                        // Receiver side save file
                         val javaFile = payload.asFile()?.asJavaFile()
                         val info = incomingFilePayloads[update.payloadId]
                         if (javaFile != null && info != null) {
@@ -115,7 +155,7 @@ class TransferManager(
                             CoroutineScope(Dispatchers.IO).launch {
                                 database.transferDao().insert(TransferEntity(
                                     fileName = info.fileName,
-                                    filePath = filePath,
+                                    filePath = filePath ?: "",
                                     isSent = false,
                                     timestamp = System.currentTimeMillis(),
                                     status = "SUCCESS"
@@ -123,65 +163,116 @@ class TransferManager(
                             }
                         }
                         receivedPayloads.remove(update.payloadId)
-                        incomingFilePayloads.remove(update.payloadId)
-                    } else {
-                        if (update.payloadId == pendingFilePayload?.id) {
-                            CoroutineScope(Dispatchers.IO).launch {
-                                database.transferDao().insert(TransferEntity(
-                                    fileName = pendingFileName,
-                                    filePath = pendingUriToSend?.toString() ?: "",
-                                    isSent = true,
-                                    timestamp = System.currentTimeMillis(),
-                                    status = "SUCCESS"
-                                ))
-                            }
-                            pendingFilePayload = null
+                    } else if (pendingSendFilesInfo.containsKey(update.payloadId)) {
+                        // Sender side success
+                        val info = pendingSendFilesInfo[update.payloadId]!!
+                        CoroutineScope(Dispatchers.IO).launch {
+                            database.transferDao().insert(TransferEntity(
+                                fileName = info.fileName,
+                                filePath = info.uri.toString(),
+                                isSent = true,
+                                timestamp = System.currentTimeMillis(),
+                                status = "SUCCESS"
+                            ))
                         }
                     }
+                    
+                    val isComplete = completedFilesCount == transferState.value.totalFiles
+                    transferState.value = transferState.value.copy(
+                        completedFiles = completedFilesCount,
+                        isComplete = isComplete,
+                        isTransferring = !isComplete,
+                        totalTransferredBytes = totalTransferred
+                    )
                 }
                 PayloadTransferUpdate.Status.FAILURE -> {
-                    transferState.value = transferState.value.copy(isTransferring = false)
+                    completedFilesCount++
+                    val isComplete = completedFilesCount == transferState.value.totalFiles
+                    transferState.value = transferState.value.copy(
+                        completedFiles = completedFilesCount,
+                        isComplete = isComplete,
+                        isTransferring = !isComplete
+                    )
                 }
             }
         }
     }
 
-    fun prepareFileToSend(endpointId: String, uri: Uri, fileName: String) {
-        pendingFileName = fileName
-        pendingUriToSend = uri
-        val pfd = context.contentResolver.openFileDescriptor(uri, "r")
-        if (pfd != null) {
-            val payload = Payload.fromFile(pfd)
-            pendingFilePayload = payload
-            val infoJson = JSONObject().apply {
-                put("type", "FILE_INFO")
-                put("fileName", fileName)
-                put("payloadId", payload.id)
+    fun prepareFilesToSend(endpointId: String, uris: List<Uri>) {
+        pendingSendPayloads.clear()
+        pendingSendFilesInfo.clear()
+        totalBytesToSend = 0L
+        completedFilesCount = 0
+        transferredBytesByPayload.clear()
+
+        val jsonArray = JSONArray()
+
+        uris.forEach { uri ->
+            var fileName = "Unknown"
+            var size = 0L
+            val cursor = context.contentResolver.query(uri, null, null, null, null)
+            cursor?.use {
+                if (it.moveToFirst()) {
+                    val nameIdx = it.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIdx = it.getColumnIndex(OpenableColumns.SIZE)
+                    if (nameIdx != -1) fileName = it.getString(nameIdx)
+                    if (sizeIdx != -1) size = it.getLong(sizeIdx)
+                }
             }
-            nearbyManager.sendPayload(endpointId, Payload.fromBytes(infoJson.toString().toByteArray()))
+
+            val pfd = context.contentResolver.openFileDescriptor(uri, "r")
+            if (pfd != null) {
+                val payload = Payload.fromFile(pfd)
+                pendingSendPayloads.add(payload)
+                pendingSendFilesInfo[payload.id] = SentFileInfo(fileName, uri)
+                totalBytesToSend += size
+
+                val fileObj = JSONObject().apply {
+                    put("fileName", fileName)
+                    put("payloadId", payload.id)
+                    put("size", size)
+                }
+                jsonArray.put(fileObj)
+            }
         }
+
+        val infoJson = JSONObject().apply {
+            put("type", "FILE_INFO_LIST")
+            put("files", jsonArray)
+        }
+        
+        transferState.value = transferState.value.copy(
+            totalFiles = pendingSendPayloads.size,
+            totalSize = totalBytesToSend,
+            completedFiles = 0,
+            totalTransferredBytes = 0L
+        )
+
+        nearbyManager.sendPayload(endpointId, Payload.fromBytes(infoJson.toString().toByteArray()))
     }
 
     fun acceptTransfer(endpointId: String) {
         val acceptJson = JSONObject().apply { put("type", "TRANSFER_ACCEPT") }
         nearbyManager.sendPayload(endpointId, Payload.fromBytes(acceptJson.toString().toByteArray()))
-        transferState.value = transferState.value.copy(pendingFileInfo = null)
+        transferState.value = transferState.value.copy(pendingTransferInfo = null)
+        completedFilesCount = 0
+        transferredBytesByPayload.clear()
     }
 
     fun rejectTransfer(endpointId: String) {
         val rejectJson = JSONObject().apply { put("type", "TRANSFER_REJECT") }
         nearbyManager.sendPayload(endpointId, Payload.fromBytes(rejectJson.toString().toByteArray()))
-        transferState.value = transferState.value.copy(pendingFileInfo = null)
+        transferState.value = transferState.value.copy(pendingTransferInfo = null)
     }
 
     private fun startFileTransfer(endpointId: String) {
-        pendingFilePayload?.let { payload ->
+        transferState.value = transferState.value.copy(
+            isTransferring = true,
+            isComplete = false,
+            completedFiles = 0
+        )
+        pendingSendPayloads.forEach { payload ->
             nearbyManager.sendPayload(endpointId, payload)
-            transferState.value = transferState.value.copy(
-                fileName = pendingFileName,
-                isTransferring = true,
-                progress = 0f
-            )
         }
     }
 }

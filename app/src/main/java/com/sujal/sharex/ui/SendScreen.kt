@@ -1,4 +1,4 @@
-﻿package com.sujal.sharex.ui
+package com.sujal.sharex.ui
 
 import android.net.Uri
 import android.provider.OpenableColumns
@@ -12,8 +12,9 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Send
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -33,19 +34,24 @@ fun SendScreen(navController: NavController, transferManager: TransferManager, n
     val context = LocalContext.current
     val discoveredDevices by nearbyManager.discoveredDevices.collectAsState()
     val transferState by transferManager.transferState.collectAsState()
-    var selectedUri by remember { mutableStateOf<Uri?>(null) }
-    var selectedFileName by remember { mutableStateOf("") }
+    var selectedUris by remember { mutableStateOf<List<Uri>>(emptyList()) }
+    var totalSelectedSize by remember { mutableStateOf(0L) }
     
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
-        if (uri != null) {
-            selectedUri = uri
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris: List<Uri> ->
+        selectedUris = uris
+        var size = 0L
+        uris.forEach { uri ->
             val cursor = context.contentResolver.query(uri, null, null, null, null)
             cursor?.use {
                 if (it.moveToFirst()) {
-                    selectedFileName = it.getString(it.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME))
+                    val sizeIdx = it.getColumnIndex(OpenableColumns.SIZE)
+                    if (sizeIdx != -1) {
+                        size += it.getLong(sizeIdx)
+                    }
                 }
             }
         }
+        totalSelectedSize = size
     }
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
@@ -60,57 +66,68 @@ fun SendScreen(navController: NavController, transferManager: TransferManager, n
         onDispose { nearbyManager.stopAll() }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF5F6FA)).padding(24.dp)) {
-        Text("Send Files", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color(0xFF333333))
+    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(24.dp)) {
+        Text("Send Files", fontSize = 32.sp, fontWeight = FontWeight.ExtraBold, color = Color.White)
         Spacer(modifier = Modifier.height(24.dp))
         
         Button(
             onClick = { launcher.launch("*/*") },
             modifier = Modifier.fillMaxWidth().height(64.dp),
-            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0072FF)),
+            colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
             shape = RoundedCornerShape(16.dp)
         ) {
-            Icon(Icons.Default.Send, contentDescription = null, tint = Color.White)
+            Icon(Icons.Default.Add, contentDescription = null, tint = Color.White)
             Spacer(modifier = Modifier.width(12.dp))
-            Text("Select File", fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(if (selectedUris.isEmpty()) "Select Files" else "Add More Files", fontSize = 18.sp, fontWeight = FontWeight.Bold)
         }
         
-        if (selectedFileName.isNotEmpty()) {
+        if (selectedUris.isNotEmpty()) {
             Spacer(modifier = Modifier.height(16.dp))
-            Card(colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(16.dp), modifier = Modifier.fillMaxWidth()) {
-                Text("Ready: $selectedFileName", modifier = Modifier.padding(16.dp), fontWeight = FontWeight.SemiBold, color = Color(0xFF333333))
+            Card(
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
+                shape = RoundedCornerShape(16.dp), 
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                    Spacer(modifier = Modifier.width(16.dp))
+                    Column {
+                        Text("${selectedUris.size} files selected", fontWeight = FontWeight.SemiBold, color = Color.White)
+                        Text(formatSize(totalSelectedSize), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                }
             }
         }
         
         Spacer(modifier = Modifier.height(32.dp))
-        Text("Nearby Receivers", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color(0xFF333333))
-        Text("Ensure receiver is waiting on the Receive screen.", fontSize = 14.sp, color = Color.Gray)
+        Text("Nearby Receivers", fontSize = 22.sp, fontWeight = FontWeight.Bold, color = Color.White)
+        Text("Ensure receiver is waiting on the Receive screen.", fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.height(16.dp))
         
         if (discoveredDevices.isEmpty()) {
             Box(modifier = Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = Color(0xFF0072FF))
+                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary)
             }
         } else {
             LazyColumn(modifier = Modifier.weight(1f)) {
                 items(discoveredDevices) { device ->
                     Card(
                         modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp).clickable {
-                            if (selectedUri != null) {
-                                transferManager.prepareFileToSend(device.endpointId, selectedUri!!, selectedFileName)
+                            if (selectedUris.isNotEmpty()) {
+                                transferManager.prepareFilesToSend(device.endpointId, selectedUris)
                                 nearbyManager.requestConnection(device.endpointId, "SenderDevice", transferManager.payloadCallback, transferManager.connectionLifecycleCallback)
                             }
                         },
-                        colors = CardDefaults.cardColors(containerColor = Color.White),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         shape = RoundedCornerShape(16.dp),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
                     ) {
                         Row(modifier = Modifier.padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Box(modifier = Modifier.size(56.dp).background(Color(0xFFE3F2FD), CircleShape), contentAlignment = Alignment.Center) {
-                                Icon(Icons.Default.Person, contentDescription = null, tint = Color(0xFF1976D2), modifier = Modifier.size(28.dp))
+                            Box(modifier = Modifier.size(50.dp).background(MaterialTheme.colorScheme.surfaceVariant, CircleShape), contentAlignment = Alignment.Center) {
+                                Icon(Icons.Default.Person, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
                             }
                             Spacer(modifier = Modifier.width(16.dp))
-                            Text(device.endpointName, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color(0xFF333333))
+                            Text(device.endpointName, fontWeight = FontWeight.Bold, fontSize = 18.sp, color = Color.White)
                         }
                     }
                 }
@@ -118,19 +135,42 @@ fun SendScreen(navController: NavController, transferManager: TransferManager, n
         }
         
         if (transferState.isTransferring || transferState.isComplete) {
-            Card(modifier = Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = Color.White), shape = RoundedCornerShape(16.dp)) {
+            Card(
+                modifier = Modifier.fillMaxWidth(), 
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface), 
+                shape = RoundedCornerShape(16.dp)
+            ) {
                 Column(modifier = Modifier.padding(20.dp)) {
-                    Text("Sending ${transferState.fileName}", fontWeight = FontWeight.Bold, color = Color(0xFF333333))
+                    Text(
+                        if (transferState.isComplete) "Transfer Complete!" else "Sending... ${transferState.completedFiles}/${transferState.totalFiles} files", 
+                        fontWeight = FontWeight.Bold, 
+                        color = Color.White
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
+                    
+                    val overallProgress = if (transferState.totalSize > 0) {
+                        transferState.totalTransferredBytes.toFloat() / transferState.totalSize.toFloat()
+                    } else 0f
+                    
                     LinearProgressIndicator(
-                        progress = transferState.progress, 
+                        progress = overallProgress, 
                         modifier = Modifier.fillMaxWidth().height(10.dp),
-                        color = Color(0xFF0072FF)
+                        color = MaterialTheme.colorScheme.primary,
+                        trackColor = MaterialTheme.colorScheme.surfaceVariant
                     )
                     Spacer(modifier = Modifier.height(8.dp))
-                    Text(if (transferState.isComplete) "Complete!" else "${(transferState.progress * 100).toInt()}%", color = Color.Gray, fontWeight = FontWeight.Bold)
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text(formatSize(transferState.totalTransferredBytes) + " / " + formatSize(transferState.totalSize), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("${(overallProgress * 100).toInt()}%", color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.Bold)
+                    }
                 }
             }
         }
     }
+}
+
+private fun formatSize(bytes: Long): String {
+    if (bytes < 1024) return "$bytes B"
+    val z = (63 - java.lang.Long.numberOfLeadingZeros(bytes)) / 10
+    return String.format("%.1f %sB", bytes.toDouble() / (1L shl (z * 10)), " KMGTPE"[z])
 }
